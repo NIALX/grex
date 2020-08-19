@@ -1,5 +1,9 @@
 extern crate colored;
 extern crate regex;
+extern crate rayon;
+
+use std::sync::{Arc, Mutex};
+use rayon::prelude::*;
 
 use colored::*;
 use std::fs::File;
@@ -7,7 +11,7 @@ use std::fs::File;
 use regex::Regex;
 use std::env;
 use std::io::prelude::*;
-use std::thread;
+//use std::thread;
 
 #[derive(Debug)]
 struct Search {
@@ -31,19 +35,29 @@ impl Search {
         };
         let lines: Vec<&str> = text.split('\n').collect();
 
-        let mut result: Vec<String> = Vec::new();
+        let  result = Arc::new(Mutex::new(Vec::new()));
         /*Searching for matches*/
-        for (i, line) in lines.iter().enumerate() {
+        // for (i, line) in lines.iter().enumerate() {
+        //     if let Some(value) = match_found(&line, &self.pattren) {
+        //         let words: Vec<&str> = line.split(" ").collect();
+
+        //         /*Coloring the matched words*/
+        //         let colored: Vec<String> = color_word(words, value);
+        //         /*Adding the matched lines with the colored words to the "result" Vec*/
+        //         result.push(format!("\t{}: {}", i, colored.join(" ")).to_string());
+        //     }
+        // }
+        lines.par_iter().enumerate().for_each(|(i, line)|{
             if let Some(value) = match_found(&line, &self.pattren) {
                 let words: Vec<&str> = line.split(" ").collect();
 
                 /*Coloring the matched words*/
                 let colored: Vec<String> = color_word(words, value);
-                dbg!(&colored);
                 /*Adding the matched lines with the colored words to the "result" Vec*/
-                result.push(format!("\t{}: {}", i, colored.join(" ")).to_string());
+                result.lock().unwrap().push(format!("\t{}: {}", i, colored.join(" ")).to_string());
             }
-        }
+        });
+        let result = Arc::try_unwrap(result).unwrap().into_inner().unwrap();
         if result.len() > 0 {
             Some(result)
         } else {
@@ -54,21 +68,35 @@ impl Search {
 
 // Coloring the matched values
 fn color_word(words: Vec<&str>, keyword: String) -> Vec<String> {
-    let mut colored: Vec<String> = vec![];
+    let  colored =  Arc::new(Mutex::new(Vec::new()));
 
-    for word in words.iter() {
+    words.par_iter().for_each(|word| {
         if word.contains(&keyword) {
-            colored.push(format!(
+            colored.lock().unwrap().push(format!(
                 "{}{}",
                 word[0..keyword.len()].red(),
                 &word[keyword.len()..]
             ));
         } else {
-            colored.push(word.to_string());
+            colored.lock().unwrap().push(word.to_string());
         }
-    }
+    });
 
-    colored
+
+
+    // for word in words.iter() {
+    //     if word.contains(&keyword) {
+    //         colored.push(format!(
+    //             "{}{}",
+    //             word[0..keyword.len()].red(),
+    //             &word[keyword.len()..]
+    //         ));
+    //     } else {
+    //         colored.push(word.to_string());
+    //     }
+    // }
+   Arc::try_unwrap(colored).unwrap().into_inner().unwrap() 
+   
 }
 
 /// This function reads a file and return it's content
@@ -105,10 +133,8 @@ fn main() {
         for fname in filenames {
             searches.push(Search::new(fname.to_string(), pattern.to_string()));
         }
-        let mut handles = vec![];
-        for s in searches.into_iter() {
-            handles.push(thread::spawn(move || {
-                let result = match s.search() {
+        searches.par_iter().for_each(|s| {
+               let result = match s.search() {
                     Some(v) => v,
                     None => vec![],
                 };
@@ -117,13 +143,39 @@ fn main() {
                     println!("{}", m);
                 }
                 println!("");
-            }));
-        }
+        });
+     
 
-        for handle in handles.into_iter() {
-            handle.join().unwrap();
-        }
     }
+    // let args = env::args().into_iter().skip(1).collect::<Vec<String>>();
+
+    // if args.len() >= 2 {
+    //     let pattern = &args[0];
+    //     let filenames = &args[1..];
+
+    //     let mut searches: Vec<Search> = Vec::new();
+    //     for fname in filenames {
+    //         searches.push(Search::new(fname.to_string(), pattern.to_string()));
+    //     }
+    //     let mut handles = vec![];
+    //     for s in searches.into_iter() {
+    //         handles.push(thread::spawn(move || {
+    //             let result = match s.search() {
+    //                 Some(v) => v,
+    //                 None => vec![],
+    //             };
+    //             println!("{}", s.filename.green());
+    //             for m in result.iter() {
+    //                 println!("{}", m);
+    //             }
+    //             println!("");
+    //         }));
+    //     }
+
+    //     for handle in handles.into_iter() {
+    //         handle.join().unwrap();
+    //     }
+    // }
 }
 
 #[cfg(test)]
